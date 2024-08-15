@@ -1,0 +1,88 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore Windows system files
+Thumbs.db
+Desktop.ini
+
+# Ignore temporary files
+*.tmp
+*.log
+*.swp
+*.swo
+*.bak
+*.orig
+*.lock
+
+# Ignore package manager files
+node_modules/
+vendor/
+
+# Ignore environment variable files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Ignore Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore compiled files
+*.o
+*.obj
+*.dll
+*.so
+*.dylib
+*.class
+
+# Ignore build directories
+build/
+dist/
+out/
+target/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Ignore Yarn files
+.yarn-integrity
+.yarn-error.log
+
+# Ignore npm files
+package-lock.json
+
+# Ignore Composer files
+composer.lock
+
+# Ignore Ruby files
+*.gem
+*.rbc
+*.rbenv-gemsets
+
+# Ignore logs and temporary files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+data/
