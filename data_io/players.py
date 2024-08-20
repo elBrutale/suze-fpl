@@ -8,6 +8,7 @@ def extract_player_data(data):
     
     # Create a list to store parsed entries
     parsed_entries = []
+    added_entries = set()
     
     for entry in new_entries:
         parsed_entry = {
@@ -17,7 +18,24 @@ def extract_player_data(data):
             "player_first_name": entry.get("player_first_name"),
             "player_last_name": entry.get("player_last_name")
         }
-        parsed_entries.append(parsed_entry)
+        if parsed_entry['entry_id'] not in added_entries:
+            added_entries.add(parsed_entry['entry_id'])
+            parsed_entries.append(parsed_entry)
+
+    # Extract the standings results
+    standings = data.get('standings', {}).get('results', [])
+    
+    for entry in standings:
+        parsed_entry = {
+            "entry_id": entry.get("entry"),
+            "entry_name": entry.get("entry_name"),
+            "joined_time": None,  # Set to None as it's not present in standings
+            "player_first_name": None,  # Set to None as it's not present in standings
+            "player_last_name": None  # Set to None as it's not present in standings
+        }
+        if parsed_entry['entry_id'] not in added_entries:
+            added_entries.add(parsed_entry['entry_id'])
+            parsed_entries.append(parsed_entry)
     
     return parsed_entries
 
