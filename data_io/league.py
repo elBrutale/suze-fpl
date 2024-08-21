@@ -68,3 +68,7 @@ def get_h2h_matches(league_id: str):
     
     return output
 
+
+def get_fpl_master_data():
+    url = "https://fantasy.premierleague.com/api/bootstrap-static/"
+    return fetch_data(url)

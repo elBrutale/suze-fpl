@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from data_io.league import LEAGUE_FIELDNAMES, STANDINGS_FIELDNAMES, H2H_LEAGUE_FIELDNAMES
-from data_io.league import get_league_data, get_h2h_matches
+from data_io.league import get_league_data, get_h2h_matches, get_fpl_master_data
 from data_io.players import extract_player_data, get_player_history, get_transfer_history, get_picks_history
 
 from analytics.utils import jsonl_to_df, read_dataframe
@@ -25,6 +25,44 @@ logging.basicConfig(
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
+
+import csv
+from datetime import datetime
+
+import csv
+from datetime import datetime
+
+def filter_max_timestamp_and_map_id_to_webname(csv_file):
+    # Dictionary to hold the max timestamp entry for each player
+    max_timestamp_entries = {}
+
+    # Open the CSV file
+    with open(csv_file, 'r') as csvfile:
+        reader = csv.DictReader(csvfile)
+        
+        for row in reader:
+            player_id = int(row['id'])
+            web_name = row['web_name']
+            current_timestamp = row['current_timestamp']
+
+            # Parse the timestamp
+            timestamp = datetime.fromisoformat(current_timestamp.replace("Z", "+00:00"))
+
+            # Check if this player is already in the dictionary
+            if player_id in max_timestamp_entries:
+                # Compare timestamps and keep the entry with the max timestamp
+                existing_timestamp = max_timestamp_entries[player_id]['current_timestamp']
+                if timestamp > existing_timestamp:
+                    max_timestamp_entries[player_id] = {'current_timestamp': timestamp, 'web_name': web_name}
+            else:
+                # Add new entry to the dictionary
+                max_timestamp_entries[player_id] = {'current_timestamp': timestamp, 'web_name': web_name}
+
+    # Create a mapping of id to web_name with the max timestamp
+    id_to_webname = {player_id: data['web_name'] for player_id, data in max_timestamp_entries.items()}
+
+    return id_to_webname
+
 
 @app.get("/suze/analytics/odds")
 async def compute_odds():
@@ -153,20 +191,65 @@ async def write_transfer_history_file():
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
 
+@app.get("/suze/static-data")
+async def get_static_data():
+    try:
+        logger.info("Received request toget all fpl player data")
+
+        # Define file paths
+        output_file_path = os.path.join("data", "static_data.json")
+        output_fpl_players_path = os.path.join("data", "fpl_players_data.csv")
+
+        # Extract picks history and write to the output file
+        master_data = get_fpl_master_data()
+        with open(output_file_path, 'w') as outfile:
+            outfile.write(json.dumps(master_data) + '\n')
+        
+        logger.info(f"Successfully wrote picks history data to {output_file_path}")
+
+        # Check if the CSV file already exists
+        file_exists = os.path.exists(output_fpl_players_path)
+
+        with open(output_fpl_players_path, 'a', newline='') as csvfile:
+            current_timestamp = datetime.now().isoformat()
+            players = master_data['elements']
+            # Define the fieldnames (i.e., CSV column headers)
+            fieldnames = list(players[0].keys()) + ['current_timestamp']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            # If the file doesn't exist, write the header
+            if not file_exists:
+                writer.writeheader()
+            for player in players:
+                player['current_timestamp'] = current_timestamp
+                writer.writerow(player)
+
+        logger.info(f"Successfully wrote FPL player data to {output_fpl_players_path}")
+        return {"message": "Static data written successfully"}
+
+    except Exception as e:
+        logger.error(f"Failed to write static data. Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    
+
 @app.get("/suze/classic-league/picks_history/{gw_number}")
 async def write_picks_history_file(gw_number: str):
     try:
         logger.info("Received request to extract and write picks history data")
 
         # Define file paths
-        input_file_path = os.path.join("data", "players.jsonl")
+        players_file_path = os.path.join("data", "players.jsonl")
+        fpl_players_path = os.path.join("data", "fpl_players_data.csv")
         output_file_path = os.path.join("data", "picks_history.jsonl")
 
+        player_id_to_name = filter_max_timestamp_and_map_id_to_webname(fpl_players_path)
+
         # Extract picks history and write to the output file
-        with open(input_file_path, 'r') as infile, open(output_file_path, 'a') as outfile:
-            for line in infile:
+        with open(players_file_path, 'r') as inplayers, open(output_file_path, 'a') as outfile:
+            for line in inplayers:
                 player = json.loads(line)
                 picks_history = get_picks_history(gw_number=gw_number, entry_id=player['entry_id'])
+                for j in range(len(picks_history["picks"])):
+                    picks_history["picks"][j]['player_name'] = player_id_to_name.get(picks_history["picks"][j]['element'], 'Unknown')
                 outfile.write(json.dumps(picks_history) + '\n')
                 logger.debug(f"Written picks history data for entry_id: {player['entry_id']}")
 
@@ -433,7 +516,132 @@ async def write_h2h_file(league_id: str):
     except Exception as e:
         logger.error(f"Failed to write data for league_id: {league_id}. Error: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+    
 
+@app.get("/suze/pregled-kola/{gw_number}")
+async def pregled_kola(gw_number: str):
+    # Reading the JSONL files
+    picks_data = []
+    players_data = {}
+    picks_file = os.path.join("data", "picks_history.jsonl")
+    players_file = os.path.join("data", "players.jsonl")
+
+    gw_number = int(gw_number)
+
+    with open(picks_file, 'r') as file:
+        for line in file:
+            picks = json.loads(line)
+            if picks['entry_history']['event'] == gw_number:
+                picks_data.append(picks)
+
+    with open(players_file, 'r') as file:
+        for line in file:
+            player_info = json.loads(line)
+            players_data[player_info['entry_id']] = player_info
+
+    # Initializing variables
+    total_players = len(picks_data)
+    bank_data = []
+    chips_used = {}
+    ownership_data = {}
+    transfer_in_counts = {}
+    transfer_out_counts = {}
+    captains = {}
+    negative_transfer_points = []
+    effective_ownership = {}
+
+    # Processing each player's data
+    for pick in picks_data:
+        entry_id = pick['entry_id']
+        player_name = f"{players_data[entry_id]['player_first_name']} {players_data[entry_id]['player_last_name']}"
+        entry_history = pick['entry_history']
+
+        # Bank information
+        if entry_history['bank'] > 0:
+            bank_data.append((entry_history['bank'], player_name))
+        
+        # Chips used
+        if pick['active_chip']:
+            chips_used[player_name] = pick['active_chip']
+        
+        # Ownership calculation
+        for p in pick['picks']:
+            if p['element'] not in ownership_data:
+                ownership_data[p['element']] = {'count': 0, 'player_name': p['player_name']}
+            ownership_data[p['element']]['count'] += 1
+        
+        # Effective ownership calculation and captains
+        for p in pick['picks']:
+            if p['is_captain']:
+                if p['player_name'] not in effective_ownership:
+                    effective_ownership[p['player_name']] = 0
+                effective_ownership[p['player_name']] += 2
+                captains[p['player_name']] = captains.get(p['player_name'], 0) + 1
+            else:
+                if p['player_name'] not in effective_ownership:
+                    effective_ownership[p['player_name']] = 0
+                effective_ownership[p['player_name']] += 1
+        
+        # Handle transfer ins/outs
+        for sub in pick.get('automatic_subs', []):
+            transfer_in_counts[sub['element_in']] = transfer_in_counts.get(sub['element_in'], 0) + 1
+            transfer_out_counts[sub['element_out']] = transfer_out_counts.get(sub['element_out'], 0) + 1
+        
+        # Negative transfer points
+        if entry_history['event_transfers_cost'] < 0:
+            negative_transfer_points.append(player_name)
+    
+    # Sort and format the output
+    n_bank = len(bank_data)
+    max_bank_amount, max_bank_player = max(bank_data, default=(0, 'N/A'))
+    
+    chips_used_str = '\n'.join([f"{name}: {chip}" for name, chip in chips_used.items()])
+    ownership_str = '\n'.join([f"{data['player_name']}\n{(data['count'] / total_players) * 100:.2f}% ({data['count']} / {total_players})" 
+                               for data in ownership_data.values() if data['count'] / total_players >= 0.5])
+
+    highest_effective_ownership_player = max(effective_ownership, key=effective_ownership.get)
+    highest_effective_ownership = effective_ownership[highest_effective_ownership_player]
+    element_to_player_name = {}
+    for pick in picks_data:
+        for p in pick['picks']:
+            element_to_player_name[p['element']] = p['player_name']
+
+    most_transferred_in_player = max(transfer_in_counts, key=transfer_in_counts.get, default='N/A')
+    most_transferred_out_player = max(transfer_out_counts, key=transfer_out_counts.get, default='N/A')
+    most_transferred_in_player_name = element_to_player_name.get(most_transferred_in_player, 'N/A')
+    most_transferred_out_player_name = element_to_player_name.get(most_transferred_out_player, 'N/A')
+
+    negative_transfer_points_str = '\n'.join(negative_transfer_points)
+
+    captains_str = '\n'.join([f"{name}: {count / total_players * 100:.2f}%" for name, count in captains.items()])
+    
+    output = f"""KOLO
+{n_bank}/{total_players} igrača ostavilo je para u banci: {max_bank_player} - {max_bank_amount}m £
+
+Iskorišteni chipovi: 
+{chips_used_str}
+
+Ownership igrača (>=50%):
+
+{ownership_str}
+
+
+{highest_effective_ownership_player} effective ownership: {highest_effective_ownership}
+
+TRANSFERI
+/
+
+IGRAČ KOJI JE UŠAO U NAJVIŠE EKIPA - {most_transferred_in_player_name}
+IGRAČ KOJI JE IZAŠAO IZ NAJVIŠE EKIPA - {most_transferred_out_player_name}
+
+MINUS:
+{negative_transfer_points_str}
+
+KAPETANI
+{captains_str}
+"""
+    
+    return {"message": output}
 
 if __name__ == "__main__":
     import uvicorn
