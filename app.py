@@ -180,7 +180,8 @@ async def write_transfer_history_file():
             for line in infile:
                 player = json.loads(line)
                 player_history = get_transfer_history(player['entry_id'])
-                outfile.write(json.dumps(player_history) + '\n')
+                for gw in player_history:
+                    outfile.write(json.dumps(gw) + '\n')
                 logger.debug(f"Written transfer history data for entry_id: {player['entry_id']}")
 
         logger.info(f"Successfully wrote transfer history data to {output_file_path}")
@@ -507,9 +508,20 @@ async def write_h2h_file(league_id: str):
             for matches in match_pages:
                 for match in matches['results']:
                     key = (str(match['league']), str(match['event']), str(match['entry_1_entry']), str(match['entry_2_entry']))
+                    # append new gws
                     if key not in existing_entries:
-                        match['timestamp_requested'] = timestamp_requested
-                        writer.writerow(match)
+                        empty_entry_cols = [
+                            "entry_1_points", "entry_1_win", "entry_1_draw", "entry_1_loss", "entry_1_total",
+                            "entry_2_points", "entry_2_win", "entry_2_draw", "entry_2_loss", "entry_2_total"
+                        ]
+                        to_write = False
+                        for col in empty_entry_cols:
+                            if str(match[col]) != '0':
+                                to_write = True
+                                break
+                        if to_write:
+                            match['timestamp_requested'] = timestamp_requested
+                            writer.writerow(match)
 
             return {"message": "H2H league matches written successfully"}
 

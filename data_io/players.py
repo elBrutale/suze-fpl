@@ -65,7 +65,6 @@ def get_transfer_history(entry_id: str):
     try:
         # Send the request to the API
         result = fetch_data(url)
-        result['entry_id'] = entry_id
         print(f"Successfully fetched transfers for entry_id: {entry_id}")
     except requests.exceptions.RequestException as e:
         print(f"Failed to fetch transfers for entry_id: {entry_id} - {e}")
